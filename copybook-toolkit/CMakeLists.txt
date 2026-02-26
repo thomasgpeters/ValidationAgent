@@ -37,3 +37,12 @@ target_include_directories(copybook-tests PRIVATE include examples/generated)
 
 include(GoogleTest)
 gtest_discover_tests(copybook-tests)
+
+# ── Interactive ncurses test/demo harness ─────────────────────────────────
+find_package(Curses REQUIRED)
+add_executable(test-harness tools/test_harness.cpp)
+target_link_libraries(test-harness copybook-core ${CURSES_LIBRARIES})
+target_include_directories(test-harness PRIVATE
+    ${CURSES_INCLUDE_DIRS}
+    examples/generated
+)
