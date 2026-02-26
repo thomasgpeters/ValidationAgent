@@ -1,0 +1,15 @@
+# Build artifacts
+copybook-toolkit/build/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*~
+
+# Compiled Java classes (legacy)
+*.class
