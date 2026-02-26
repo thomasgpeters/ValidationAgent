@@ -73,3 +73,17 @@ target_include_directories(test-harness PRIVATE
     ${CURSES_INCLUDE_DIRS}
     examples/generated
 )
+
+# ── Web-based visual designer ─────────────────────────────────────────
+add_executable(web-designer tools/web_designer/main.cpp)
+target_link_libraries(web-designer
+    copybook-core
+    copybook-parser
+    copybook-serial
+    nlohmann_json::nlohmann_json
+    pthread
+)
+target_include_directories(web-designer PRIVATE
+    tools/web_designer
+    examples/generated
+)
