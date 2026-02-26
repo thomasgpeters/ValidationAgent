@@ -17,11 +17,16 @@
 9. [Numeric Fields](#numeric-fields)
 10. [Buffer Serialization and Round-Trips](#buffer-serialization-and-round-trips)
 11. [COBOL Type Mapping](#cobol-type-mapping)
-12. [Migration from Java](#migration-from-java)
-13. [Test Harness](#test-harness)
-14. [Running Tests](#running-tests)
-15. [Project Structure](#project-structure)
-16. [Roadmap](#roadmap)
+12. [Copybook Parser](#copybook-parser)
+13. [C++ Code Generator](#c-code-generator)
+14. [JSON Serialization](#json-serialization)
+15. [YAML Serialization](#yaml-serialization)
+16. [Migration from Java](#migration-from-java)
+17. [Test Harness](#test-harness)
+18. [Running Tests](#running-tests)
+19. [Project Structure](#project-structure)
+20. [Development Options Reference](#development-options-reference)
+21. [Roadmap](#roadmap)
 
 ---
 
@@ -434,6 +439,101 @@ assert(p2.getData("FIRST_NAME") == p1.getData("FIRST_NAME"));
 
 ---
 
+## Copybook Parser
+
+The parser reads standard COBOL `.cpy` files and produces a structured
+`CopybookDefinition` with field names, offsets, sizes, and types computed
+automatically.
+
+```cpp
+#include <copybook/parser/copybook_parser.h>
+
+CopybookParser parser;
+auto def = parser.parseFile("ACCOUNT.cpy");
+
+std::cout << def.record_name << ": " << def.total_size << " bytes\n";
+for (const auto& f : def.fields) {
+    std::cout << f.cpp_name << " offset=" << f.offset
+              << " size=" << f.size << "\n";
+}
+```
+
+Supported PIC clauses: `X(n)`, `9(n)`, `S9(n)`, `9(n)V9(m)`, `9(n)V99`,
+`COMP`, `COMP-3`, `FILLER`, and GROUP items (no PIC clause).
+
+---
+
+## C++ Code Generator
+
+The code generator takes a parsed `CopybookDefinition` and emits a complete
+C++ header file.
+
+```cpp
+#include <copybook/parser/codegen.h>
+
+CopybookParser parser;
+Codegen codegen;
+
+auto def = parser.parseFile("PERSON.cpy");
+codegen.generateFile(def, "generated/");  // writes generated/person.h
+```
+
+Generated headers include: `RECORD_SIZE` constants, field SIZE/OFFSET constants,
+constructors, `registerField()` calls, child GROUP classes with typed accessors,
+and `syncChildren()` support.
+
+---
+
+## JSON Serialization
+
+Uses [nlohmann/json](https://github.com/nlohmann/json) for robust JSON
+parsing and generation.
+
+```cpp
+#include <copybook/serial/json_serializer.h>
+
+// Record → JSON
+Person p = makeTestPerson();
+std::string json = JsonSerializer::toJson(p);
+// {"ID": "EMP-001", "FIRST_NAME": "Thomas", "AGE": 60, ...}
+
+// JSON → Record
+Person p2;
+JsonSerializer::fromJson(p2, json);
+
+// Access as nlohmann::json object
+auto j = JsonSerializer::toJsonObject(p);
+std::string name = j["FIRST_NAME"];
+```
+
+Numeric fields emit as JSON numbers. GROUP items become nested objects.
+Trailing spaces are trimmed by default.
+
+---
+
+## YAML Serialization
+
+Lightweight built-in YAML serializer — no external dependency.
+
+```cpp
+#include <copybook/serial/yaml_serializer.h>
+
+// Record → YAML
+std::string yaml = YamlSerializer::toYaml(person);
+// ---
+// ID: EMP-001
+// FIRST_NAME: Thomas
+// AGE: 60
+// HOME_PHONE:
+//   NUMBER: 555-123-4567
+
+// YAML → Record
+Person p;
+YamlSerializer::fromYaml(p, yaml);
+```
+
+---
+
 ## Migration from Java
 
 ### Field Access — Before (Java)
@@ -536,31 +636,63 @@ Or run the test binary directly for verbose output:
 ```
 copybook-toolkit/
 ├── CMakeLists.txt                          Build system
-├── include/copybook/core/
-│   ├── field_type.h                        COBOL type enum
-│   ├── field_descriptor.h                  Field metadata struct
-│   ├── record_buffer.h                     Fixed-length byte buffer
-│   └── record_base.h                       Base class for all records
-├── src/core/
-│   ├── record_buffer.cpp                   Buffer implementation
-│   └── record_base.cpp                     RecordBase implementation
+├── USER_GUIDE.md                           This file
+├── DEVELOPMENT_OPTIONS.md                  Feature reference & examples
+├── include/copybook/
+│   ├── core/
+│   │   ├── field_type.h                    COBOL type enum
+│   │   ├── field_descriptor.h              Field metadata struct
+│   │   ├── record_buffer.h                 Fixed-length byte buffer
+│   │   └── record_base.h                   Base class for all records
+│   ├── parser/
+│   │   ├── copybook_parser.h               .cpy file parser
+│   │   └── codegen.h                       C++ header generator
+│   └── serial/
+│       ├── json_serializer.h               JSON via nlohmann/json
+│       └── yaml_serializer.h               YAML serializer
+├── src/
+│   ├── core/
+│   │   ├── record_buffer.cpp
+│   │   └── record_base.cpp
+│   ├── parser/
+│   │   ├── copybook_parser.cpp
+│   │   └── codegen.cpp
+│   └── serial/
+│       ├── json_serializer.cpp
+│       └── yaml_serializer.cpp
 ├── examples/
 │   ├── copybooks/
-│   │   └── PERSON.cpy                      Sample COBOL copybook
+│   │   ├── PERSON.cpy                      115 bytes — basic record
+│   │   ├── ACCOUNT.cpy                     199 bytes — financial record
+│   │   ├── BROKER-CONTROL.cpy              67 bytes — commission rates
+│   │   └── TRADE-RECORD.cpy                192 bytes — trading record
 │   ├── generated/
-│   │   ├── person.h                        Person record (ported from Java)
+│   │   ├── person.h                        Person (hand-ported from Java)
 │   │   ├── phone.h                         Phone sub-record
 │   │   └── address.h                       Address sub-record
 │   └── demo/
-│       └── standalone_demo.cpp             Non-interactive demo
+│       └── standalone_demo.cpp
 ├── test/
-│   ├── data/
-│   │   └── PERSON.cpy                      Test copybook data
-│   ├── record_buffer_test.cpp              RecordBuffer unit tests
-│   └── record_base_test.cpp                RecordBase + Person unit tests
+│   ├── data/PERSON.cpy
+│   ├── record_buffer_test.cpp              19 tests
+│   ├── record_base_test.cpp                24 tests
+│   ├── copybook_parser_test.cpp            30 tests
+│   ├── codegen_test.cpp                    22 tests
+│   └── serializer_test.cpp                 20 tests
 └── tools/
-    └── test_harness.cpp                    ncurses interactive harness
+    └── test_harness.cpp                    ncurses harness (7 features)
 ```
+
+---
+
+## Development Options Reference
+
+See [DEVELOPMENT_OPTIONS.md](DEVELOPMENT_OPTIONS.md) for comprehensive coverage of:
+- All code generation options and configurations
+- JSON/YAML serialization with examples
+- Cross-format round-trip patterns
+- Sample copybook descriptions
+- Development workflow recipes
 
 ---
 
@@ -569,7 +701,7 @@ copybook-toolkit/
 | Sprint | Status | Deliverable |
 |---|---|---|
 | **1** | Complete | Core engine: RecordBuffer, RecordBase, Person proof-of-concept |
-| **2** | Next | COBOL copybook parser: reads `.cpy` files, auto-generates C++ classes |
-| **3** | Planned | gRPC transport layer: replaces Java socket server |
+| **2** | Complete | COBOL copybook parser, C++ code generator, JSON/YAML serialization |
+| **3** | Next | gRPC transport layer: replaces Java socket server |
 | **4** | Planned | Validation engine: port rule evaluation from Java `ValidateData` |
 | **5** | Planned | Integration tests, CI pipeline, end-to-end demo |

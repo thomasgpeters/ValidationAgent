@@ -1,0 +1,519 @@
+# Development Options & Feature Reference
+
+This document covers all available features, configuration options,
+and development workflows for the COBOL Copybook Toolkit.
+
+---
+
+## Table of Contents
+
+1. [Library Components](#library-components)
+2. [Copybook Parser](#copybook-parser)
+3. [C++ Code Generator](#c-code-generator)
+4. [JSON Serialization (nlohmann/json)](#json-serialization)
+5. [YAML Serialization](#yaml-serialization)
+6. [Cross-Format Round-Trips](#cross-format-round-trips)
+7. [Code Generation Options](#code-generation-options)
+8. [Interactive Test Harness](#interactive-test-harness)
+9. [Build Targets & Dependencies](#build-targets--dependencies)
+10. [Sample Copybooks](#sample-copybooks)
+11. [Development Workflow Examples](#development-workflow-examples)
+
+---
+
+## Library Components
+
+The toolkit is split into three static libraries:
+
+| Library | Link Target | Purpose |
+|---|---|---|
+| `libcopybook-core.a` | `copybook-core` | RecordBuffer, RecordBase, FieldDescriptor, FieldType |
+| `libcopybook-parser.a` | `copybook-parser` | CopybookParser, Codegen |
+| `libcopybook-serial.a` | `copybook-serial` | JsonSerializer (nlohmann/json), YamlSerializer |
+
+Dependencies: `copybook-serial` → `copybook-core` + `nlohmann_json`, `copybook-parser` → `copybook-core`.
+
+---
+
+## Copybook Parser
+
+**Headers:** `include/copybook/parser/copybook_parser.h`
+
+Reads standard COBOL copybook `.cpy` files and produces a `CopybookDefinition` — an in-memory representation of the record layout.
+
+### Supported PIC Clause Forms
+
+| PIC Clause | FieldType | Example |
+|---|---|---|
+| `PIC X(n)` | CHARACTER | `PIC X(32)` → 32 bytes |
+| `PIC X` | CHARACTER | 1 byte |
+| `PIC XXX` | CHARACTER | 3 bytes |
+| `PIC 9(n)` | ZONED_UNSIGNED | `PIC 9(5)` → 5 bytes |
+| `PIC S9(n)` | ZONED_NUMERIC | `PIC S9(9)` → 9 bytes |
+| `PIC 9(n)V9(m)` | ZONED_UNSIGNED | `PIC 9(5)V99` → 7 bytes, 2 decimals |
+| `PIC 9(n)V99` | ZONED_UNSIGNED | `PIC 9(3)V9(4)` → 7 bytes, 4 decimals |
+| `PIC 9(n) COMP-3` | PACKED_DECIMAL | Future support |
+| `PIC 9(n) COMP` | BINARY | Future support |
+| GROUP (no PIC) | RECORD | Contains child fields |
+| `FILLER` | FILLER | Padding, not addressable |
+
+### Usage
+
+```cpp
+#include <copybook/parser/copybook_parser.h>
+
+CopybookParser parser;
+
+// Parse from file
+auto def = parser.parseFile("ACCOUNT.cpy");
+
+// Parse from string (useful for testing)
+auto def2 = parser.parseString(R"(
+   01  MY-RECORD.
+       05  NAME     PIC X(20).
+       05  AGE      PIC 9(3).
+)");
+
+// Access parsed fields
+std::cout << "Record: " << def.record_name << "\n";
+std::cout << "Size: " << def.total_size << " bytes\n";
+std::cout << "Fields: " << def.fields.size() << "\n";
+
+for (const auto& field : def.fields) {
+    std::cout << field.cpp_name << " offset=" << field.offset
+              << " size=" << field.size << "\n";
+}
+```
+
+### CopybookDefinition Structure
+
+```cpp
+struct CopybookDefinition {
+    std::string                record_name;     // "ACCOUNT"
+    std::string                cpp_class_name;  // "Account"
+    int                        total_size;      // total byte length
+    std::vector<CopybookField> fields;          // top-level fields
+};
+
+struct CopybookField {
+    int         level;              // COBOL level (01, 05, 10, ...)
+    std::string cobol_name;         // "FIRST-NAME"
+    std::string cpp_name;           // "FIRST_NAME"
+    std::string pic_clause;         // "X(32)"
+    FieldType   type;
+    int         size;
+    int         decimal_positions;
+    int         offset;
+    bool        is_filler;
+    bool        is_group;
+    std::vector<CopybookField> children;
+};
+```
+
+---
+
+## C++ Code Generator
+
+**Headers:** `include/copybook/parser/codegen.h`
+
+Takes a `CopybookDefinition` and emits a complete C++ header file with a record class.
+
+### Usage
+
+```cpp
+#include <copybook/parser/codegen.h>
+
+CopybookParser parser;
+Codegen codegen;
+
+auto def = parser.parseFile("PERSON.cpy");
+
+// Generate header string
+std::string header = codegen.generateHeader(def);
+std::cout << header;
+
+// Or write directly to a file
+std::string path = codegen.generateFile(def, "generated/");
+// Writes: generated/person.h
+```
+
+### Generated Code Features
+
+The generated header includes:
+- `#pragma once` header guard
+- `#include <copybook/core/record_base.h>`
+- Child GROUP classes (emitted before the parent)
+- `static constexpr int RECORD_SIZE`
+- `static constexpr int` for each field's SIZE and OFFSET
+- Default constructor (blank buffer) and raw-data constructor
+- `initFields()` with `registerField()` calls
+- `initChildren()` with `registerChild()` calls for GROUP items
+- Typed accessor methods for GROUP children (e.g., `HomePhone& home_phone()`)
+
+### Code Generation Options
+
+```cpp
+struct CodegenOptions {
+    std::string ns = "copybook::generated";  // target namespace
+    bool emit_offsets     = true;             // static constexpr constants
+    bool emit_comments    = true;             // COBOL source in comments
+    bool emit_child_accessors = true;         // typed accessor methods
+};
+
+// Example: custom namespace, no comments
+CodegenOptions opts;
+opts.ns = "myapp::records";
+opts.emit_comments = false;
+std::string code = codegen.generateHeader(def, opts);
+```
+
+---
+
+## JSON Serialization
+
+**Headers:** `include/copybook/serial/json_serializer.h`
+**Depends on:** [nlohmann/json](https://github.com/nlohmann/json) v3.11.3 (fetched automatically)
+
+### Record to JSON
+
+```cpp
+#include <copybook/serial/json_serializer.h>
+
+Person person;
+person.setData("FIRST_NAME", "Thomas");
+person.setNumeric("AGE", 60);
+person.homePhone().setData("NUMBER", "555-123-4567");
+person.syncChildren();
+
+// Pretty JSON (default)
+std::string json = JsonSerializer::toJson(person);
+```
+
+Output:
+```json
+{
+  "ID": "EMP-001",
+  "FIRST_NAME": "Thomas",
+  "LAST_NAME": "Peters",
+  "MIDDLE_INITIAL": "G",
+  "AGE": 60,
+  "SEX": "M",
+  "DATE_OF_BIRTH": "1965-03-15",
+  "HOME_PHONE": {
+    "NUMBER": "555-123-4567"
+  },
+  "WORK_PHONE": {
+    "NUMBER": "555-987-6543"
+  }
+}
+```
+
+### JSON to Record
+
+```cpp
+Person p;
+JsonSerializer::fromJson(p, R"({
+    "FIRST_NAME": "Alice",
+    "AGE": 30,
+    "HOME_PHONE": {
+        "NUMBER": "999-888-7777"
+    }
+})");
+
+// Only specified fields are updated; others remain as spaces/zeros
+std::cout << p.getData("FIRST_NAME");  // "Alice                           "
+std::cout << p.getNumeric("AGE");       // 30
+```
+
+### Options
+
+```cpp
+// Pretty-printed with trimming (default)
+JsonSerializer::toJson(record, true, true);
+
+// Compact JSON (no whitespace)
+JsonSerializer::toJson(record, false, true);
+
+// Full field widths preserved (no trimming)
+JsonSerializer::toJson(record, true, false);
+
+// Get as nlohmann::json object for programmatic access
+auto j = JsonSerializer::toJsonObject(record);
+std::string name = j["FIRST_NAME"];
+
+// Load from nlohmann::json object
+nlohmann::json input = {{"FIRST_NAME", "Bob"}, {"AGE", 25}};
+JsonSerializer::fromJsonObject(record, input);
+```
+
+### Numeric Field Handling in JSON
+
+| Field Type | JSON Output | JSON Input |
+|---|---|---|
+| `PIC 9(3)` → value 60 | `"AGE": 60` | `"AGE": 60` |
+| `PIC 9(5)V99` → value 12345 | `"BALANCE": 123.45` | `"BALANCE": 123.45` |
+| `PIC S9(9)V99` → value -5000 | `"AMOUNT": -50.00` | `"AMOUNT": -50.0` |
+
+---
+
+## YAML Serialization
+
+**Headers:** `include/copybook/serial/yaml_serializer.h`
+**No external dependencies** — lightweight built-in serializer.
+
+### Record to YAML
+
+```cpp
+#include <copybook/serial/yaml_serializer.h>
+
+Person person = makeTestPerson();
+std::string yaml = YamlSerializer::toYaml(person);
+```
+
+Output:
+```yaml
+---
+ID: EMP-001
+FIRST_NAME: Thomas
+LAST_NAME: Peters
+MIDDLE_INITIAL: G
+AGE: 60
+SEX: M
+DATE_OF_BIRTH: 1965-03-15
+HOME_PHONE:
+  NUMBER: 555-123-4567
+WORK_PHONE:
+  NUMBER: 555-987-6543
+```
+
+### YAML to Record
+
+```cpp
+Person p;
+YamlSerializer::fromYaml(p, R"(---
+FIRST_NAME: Alice
+AGE: 30
+HOME_PHONE:
+  NUMBER: 999-888-7777
+)");
+```
+
+### Options
+
+```cpp
+// With trimming (default)
+YamlSerializer::toYaml(record, true);
+
+// Full field widths preserved
+YamlSerializer::toYaml(record, false);
+```
+
+---
+
+## Cross-Format Round-Trips
+
+Data can flow between any combination of formats:
+
+```
+COBOL Buffer ←→ JSON ←→ YAML ←→ COBOL Buffer
+```
+
+### Example: JSON to YAML
+
+```cpp
+Person p1;
+JsonSerializer::fromJson(p1, jsonString);
+p1.syncChildren();
+std::string yaml = YamlSerializer::toYaml(p1);
+```
+
+### Example: YAML to JSON
+
+```cpp
+Person p2;
+YamlSerializer::fromYaml(p2, yamlString);
+p2.syncChildren();
+std::string json = JsonSerializer::toJson(p2);
+```
+
+### Example: COBOL Buffer to JSON to COBOL Buffer
+
+```cpp
+// Receive raw COBOL data (e.g., from gRPC or file)
+Person p1(rawBytes, 115);
+std::string json = JsonSerializer::toJson(p1);
+
+// ... transmit JSON ...
+
+Person p2;
+JsonSerializer::fromJson(p2, json);
+p2.syncChildren();
+std::string cobolBuffer = p2.getData();  // 115-byte fixed buffer
+```
+
+---
+
+## Interactive Test Harness
+
+Run `./test-harness` from the build directory for an ncurses-based interactive UI.
+
+### Menu Options
+
+| # | Feature | Description |
+|---|---|---|
+| 1 | **Run Unit Tests** | Execute full GoogleTest suite (115 tests) with colorized output |
+| 2 | **Run Standalone Demo** | Capture and display the standalone Person record demo |
+| 3 | **Interactive Inspector** | Edit Person fields live with real-time hex dump |
+| 4 | **Buffer Round-Trip Test** | Serialize/deserialize/verify with per-field PASS/FAIL |
+| 5 | **Field Layout Visualizer** | Byte-level offset map with visual byte grid |
+| 6 | **JSON/YAML Serialization** | Export Person as JSON and YAML, round-trip verification |
+| 7 | **Copybook Parser + Codegen** | Parse all .cpy files, show field layouts, generate C++ header |
+
+### Controls
+
+| Key | Action |
+|---|---|
+| Up/Down arrows | Navigate menu or scroll |
+| Enter | Select/activate |
+| PgUp/PgDn | Scroll in output viewer |
+| Home/End | Jump to top/bottom |
+| q / Esc | Back / quit |
+
+### Inspector Controls
+
+| Key | Action |
+|---|---|
+| Up/Down | Select field |
+| Enter | Edit field value |
+| c | Clear selected field |
+| r | Reset all fields to defaults |
+| q | Return to main menu |
+
+---
+
+## Build Targets & Dependencies
+
+```
+copybook-core          (no dependencies)
+    │
+    ├── copybook-parser     (depends on: copybook-core)
+    │
+    ├── copybook-serial     (depends on: copybook-core, nlohmann_json)
+    │
+    ├── standalone-demo     (depends on: copybook-core)
+    │
+    ├── copybook-tests      (depends on: all libraries, GoogleTest)
+    │
+    └── test-harness        (depends on: all libraries, ncurses)
+```
+
+### External Dependencies (auto-fetched by CMake)
+
+| Library | Version | Purpose |
+|---|---|---|
+| [nlohmann/json](https://github.com/nlohmann/json) | 3.11.3 | JSON parsing and generation |
+| [GoogleTest](https://github.com/google/googletest) | 1.14.0 | Unit testing framework |
+| ncurses | system | Interactive test harness UI |
+
+---
+
+## Sample Copybooks
+
+Four copybooks are included for testing and demonstration:
+
+### PERSON.cpy (115 bytes)
+Simple record with CHARACTER, ZONED_UNSIGNED, and two GROUP items.
+
+### ACCOUNT.cpy (199 bytes)
+Financial record with FILLER, signed numerics (PIC S9(9)V99), unsigned decimals, and a nested CUSTOMER-ADDRESS group with 5 fields.
+
+### BROKER-CONTROL.cpy (67 bytes)
+Compact record with a commission rate field (`PIC 9(3)V9(4)` — 4 decimal places).
+
+### TRADE-RECORD.cpy (192 bytes)
+Complex trading record with two GROUP items (BROKER-INFO, CUSTOMER-INFO), multiple decimal fields (PRICE, TOTAL-AMOUNT, COMMISSION), and signed amounts.
+
+---
+
+## Development Workflow Examples
+
+### Add a New Copybook Record
+
+1. Create the `.cpy` file:
+```
+       01  ORDER.
+           05  ORDER-ID        PIC X(16).
+           05  CUSTOMER-ID     PIC X(12).
+           05  TOTAL           PIC S9(9)V99.
+           05  STATUS          PIC X(1).
+```
+
+2. Parse and generate:
+```cpp
+CopybookParser parser;
+Codegen codegen;
+
+auto def = parser.parseFile("ORDER.cpy");
+codegen.generateFile(def, "generated/");
+// Creates: generated/order.h
+```
+
+3. Use the generated class:
+```cpp
+#include "generated/order.h"
+using namespace copybook::generated;
+
+Order order;
+order.setData("ORDER_ID", "ORD-2025-0001");
+order.setData("CUSTOMER_ID", "CUST-12345");
+order.setNumeric("TOTAL", 1234567);  // 12345.67 (V99)
+order.setData("STATUS", "A");
+
+std::string json = JsonSerializer::toJson(order);
+```
+
+### Convert Legacy COBOL Data to JSON
+
+```cpp
+// Read raw COBOL record from file or socket
+char rawData[199];
+file.read(rawData, 199);
+
+Account acct(rawData, 199);
+std::string json = JsonSerializer::toJson(acct);
+// {
+//   "COMPANY_NO": 12345,
+//   "ACCOUNT_NO": "ACC-001",
+//   "BALANCE": -1234.56,
+//   ...
+// }
+```
+
+### Load Configuration from YAML
+
+```cpp
+BrokerControl broker;
+YamlSerializer::fromYaml(broker, R"(---
+BROKER_ID: BRK-001
+BROKER_NAME: Smith & Associates
+COMMISSION_RATE: 3.5000
+OFFICE_CODE: NYC1
+)");
+
+// Now serialize to COBOL buffer for transmission
+broker.syncChildren();
+std::string cobolBuffer = broker.getData();
+```
+
+### Run All Tests
+
+```bash
+cd copybook-toolkit/build
+cmake --build . && ctest --output-on-failure
+```
+
+Or use the interactive harness:
+```bash
+./test-harness
+# Select "Run Unit Tests" from the menu
+```
