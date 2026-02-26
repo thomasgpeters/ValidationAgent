@@ -1,0 +1,8 @@
+#BlueJ class context
+comment0.target=DataObjectBase()
+comment1.params=fieldName\ value
+comment1.target=void\ setData(String,\ String)
+comment2.target=String\ getData()
+comment3.params=fieldName
+comment3.target=String\ getData(String)
+numComments=4

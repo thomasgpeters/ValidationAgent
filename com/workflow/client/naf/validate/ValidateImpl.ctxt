@@ -1,0 +1,11 @@
+#BlueJ class context
+comment0.target=class\ ValidateImpl
+comment1.params=
+comment1.target=~class-init~()
+comment2.target=LIB_LOADED
+comment3.params=pass_list
+comment3.target=char[]\ execute(char[])
+comment4.params=pass_list
+comment4.target=char[]\ validate(char[])
+comment5.target=VALIDATIONS_LIBRARY
+numComments=6

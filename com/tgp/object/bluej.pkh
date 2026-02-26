@@ -1,0 +1,26 @@
+#BlueJ package file
+package.editor.height=400
+package.editor.width=560
+package.editor.x=119
+package.editor.y=62
+package.numDependencies=0
+package.numTargets=2
+package.showExtends=true
+package.showUses=true
+target1.height=62
+target1.name=data
+target1.type=PackageTarget
+target1.width=80
+target1.x=60
+target1.y=90
+target2.editor.height=734
+target2.editor.width=880
+target2.editor.x=119
+target2.editor.y=36
+target2.height=50
+target2.name=DataObjectBase
+target2.showInterface=false
+target2.type=ClassTarget
+target2.width=120
+target2.x=170
+target2.y=20

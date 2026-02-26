@@ -1,0 +1,34 @@
+! ** JCreator Project File (C)2000
+! ********** DO NOT EDIT *********
+
+VERSION := "1.10"
+LABEL := "ValidationsAgent"
+JDKPROFILE := "JDK1.3.1"
+ACTIVE := "0"
+OUTPUTPATH := "..\\\\ValidationsAgent"
+COMPILER := "<Default>"
+
+! Start RunTime Configuration Structure
+#[BeginRunTime]LABEL := "<Default>" RUNAPPLIC := "" RUNAPPLET := "" PARAM := "" RUN := "com.workflow.client.naf.validate.TestValidate" CHECK := "11" #[EndRunTime]
+#[BeginRunTime]LABEL := "validations" RUNAPPLIC := "validations" RUNAPPLET := "<Default>" RUNDEBUG := "<Default>" PARAM := "" RUN := "com.workflow.client.naf.validate.TestValidate" CHECK := "0" #[EndRunTime]
+
+! Start Required Libraries Structure
+#[BeginRLibrary]LABEL := "TPS Classes" #[EndRLibrary]
+#[BeginRLibrary]LABEL := "Versata PLA" #[EndRLibrary]
+#[BeginRLibrary]LABEL := "Junit" #[EndRLibrary]
+
+! Start Project Folder Structure
+#[BeginFolder]
+LABEL := "Root"
+FILTER := ""
+
+#[BeginFile]SOURCE := "\\BrokerControlImpl.java" #[EndFile]
+#[BeginFile]SOURCE := "\\GenericValidationBufferImpl.java" #[EndFile]
+#[BeginFile]SOURCE := "\\PassListBase.java" #[EndFile]
+#[BeginFile]SOURCE := "\\PassListImpl.java" #[EndFile]
+#[BeginFile]SOURCE := "\\ShipmentHeaderImpl.java" #[EndFile]
+#[BeginFile]SOURCE := "\\TestClass.java" #[EndFile]
+#[BeginFile]SOURCE := "\\TestValidate.java" #[EndFile]
+#[BeginFile]SOURCE := "\\TransModeImpl.java" #[EndFile]
+#[BeginFile]SOURCE := "\\ValidateImpl.java" #[EndFile]
+#[EndFolder]

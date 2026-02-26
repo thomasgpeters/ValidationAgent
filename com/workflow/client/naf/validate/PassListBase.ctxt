@@ -1,0 +1,17 @@
+#BlueJ class context
+comment0.target=class\ PassListBase
+comment1.target=RECORD_TYPE
+comment10.params=fieldName\ value
+comment10.target=void\ setData(String,String)
+comment2.params=
+comment2.target=PassListBase()
+comment3.params=
+comment3.target=String\ getData()
+comment4.params=fieldName
+comment4.target=String\ getData(String)
+comment5.target=ZONED_UNSIGNED_TYPE
+comment6.target=DATA_ELEMENT_SIZE
+comment7.target=ZONED_NUMERIC_TYPE
+comment8.target=CHARACTER_TYPE
+comment9.target=data_elements
+numComments=11
