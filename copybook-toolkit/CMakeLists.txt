@@ -132,3 +132,30 @@ target_link_libraries(transport-tests
 )
 target_include_directories(transport-tests PRIVATE include src/transport)
 gtest_discover_tests(transport-tests)
+
+# ── Validation library ───────────────────────────────────────────────────────
+add_library(copybook-validation
+    src/validation/validation_engine.cpp
+)
+target_link_libraries(copybook-validation copybook-core)
+target_include_directories(copybook-validation PUBLIC include)
+
+# Validation tests
+add_executable(validation-tests test/validation_test.cpp)
+target_link_libraries(validation-tests
+    copybook-validation
+    copybook-transport
+    GTest::gtest_main
+)
+target_include_directories(validation-tests PRIVATE include src/transport)
+gtest_discover_tests(validation-tests)
+
+# ── Integration tests (end-to-end) ──────────────────────────────────────────
+add_executable(integration-tests test/integration_test.cpp)
+target_link_libraries(integration-tests
+    copybook-validation
+    copybook-transport
+    GTest::gtest_main
+)
+target_include_directories(integration-tests PRIVATE include src/transport)
+gtest_discover_tests(integration-tests)

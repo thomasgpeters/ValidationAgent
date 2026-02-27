@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "claude/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        build_type: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential \
+            libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
+            libncurses5-dev \
+            pkg-config
+
+      - name: Set compiler
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CXX=clang++" >> $GITHUB_ENV
+          else
+            echo "CC=gcc" >> $GITHUB_ENV
+            echo "CXX=g++" >> $GITHUB_ENV
+          fi
+
+      - name: Configure
+        working-directory: copybook-toolkit
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        working-directory: copybook-toolkit/build
+        run: make -j$(nproc)
+
+      - name: Run core tests
+        working-directory: copybook-toolkit/build
+        run: ./copybook-tests --gtest_output=xml:test-results-core.xml
+
+      - name: Run transport tests
+        working-directory: copybook-toolkit/build
+        run: ./transport-tests --gtest_output=xml:test-results-transport.xml
+
+      - name: Run validation tests
+        working-directory: copybook-toolkit/build
+        run: ./validation-tests --gtest_output=xml:test-results-validation.xml
+
+      - name: Run integration tests
+        working-directory: copybook-toolkit/build
+        run: ./integration-tests --gtest_output=xml:test-results-integration.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.compiler }}-${{ matrix.build_type }}
+          path: copybook-toolkit/build/test-results-*.xml
