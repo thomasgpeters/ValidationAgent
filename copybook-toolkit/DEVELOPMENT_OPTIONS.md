@@ -16,11 +16,12 @@ and development workflows for the COBOL Copybook Toolkit.
 7. [Code Generation Options](#code-generation-options)
 8. [Interactive Test Harness](#interactive-test-harness)
 9. [Visual Designer (Web Application)](#visual-designer-web-application)
-10. [Build Targets & Dependencies](#build-targets--dependencies)
-11. [Sample Copybooks](#sample-copybooks)
-12. [REST API Reference](#rest-api-reference)
-13. [Development Workflow Examples](#development-workflow-examples)
-14. [Project Roadmap](#project-roadmap)
+10. [gRPC Transport Layer](#grpc-transport-layer)
+11. [Build Targets & Dependencies](#build-targets--dependencies)
+12. [Sample Copybooks](#sample-copybooks)
+13. [REST API Reference (Web Designer)](#rest-api-reference-web-designer)
+14. [Development Workflow Examples](#development-workflow-examples)
+15. [Project Roadmap](#project-roadmap)
 
 ---
 
@@ -501,22 +502,174 @@ cd copybook-toolkit/build && cmake --build . --target web-designer
 
 ---
 
+## gRPC Transport Layer
+
+**Proto:** `proto/copybook_service.proto`
+**Headers:** `include/copybook/transport/record_transport.h`, `grpc_service.h`, `grpc_client.h`
+**Library:** `libcopybook-transport.a`
+**Depends on:** gRPC 1.51+, Protobuf 3.21+, all copybook libraries
+
+Provides remote access to copybook records over gRPC. Supports sending/receiving
+raw COBOL buffers, field extraction/packing, schema introspection, format
+conversion (JSON/YAML), and bidirectional streaming.
+
+### Starting the gRPC Server
+
+```bash
+cd copybook-toolkit/build
+
+# Default: port 50051, loads from examples/copybooks/
+./grpc-server
+
+# Custom port and directory
+./grpc-server 50051 /path/to/copybooks/
+```
+
+### Service RPCs
+
+| RPC | Description |
+|---|---|
+| `SendRecord` | Send a raw COBOL buffer to the server for storage |
+| `GetFields` | Extract named field values from a raw buffer |
+| `SetFields` | Pack named field values into a raw COBOL buffer |
+| `GetSchema` | Get the schema for a specific copybook record |
+| `ListSchemas` | List all known copybook schemas |
+| `Convert` | Convert between raw buffer and JSON/YAML formats |
+| `StreamRecords` | Bidirectional streaming: send/receive records in batch |
+
+### RecordRegistry
+
+The `RecordRegistry` class manages copybook definitions and record factories:
+
+```cpp
+#include <copybook/transport/record_transport.h>
+
+using namespace copybook::transport;
+
+RecordRegistry registry;
+
+// Load all .cpy files from a directory
+registry.loadDirectory("examples/copybooks");
+
+// Or register individual copybooks
+CopybookParser parser;
+auto def = parser.parseFile("ORDER.cpy");
+registry.registerCopybook(def);
+
+// Create records from the registry
+auto record = registry.createBlankRecord("PERSON");
+record->setData("FIRST_NAME", "Alice");
+
+auto record2 = registry.createRecord("PERSON", rawBuffer, 115);
+
+// Extract/apply fields
+auto fields = RecordRegistry::extractFields(*record);
+RecordRegistry::applyFields(*record2, fields);
+```
+
+### CopybookClient (C++ Client)
+
+```cpp
+#include <copybook/transport/grpc_client.h>
+
+using namespace copybook::transport;
+
+CopybookClient client("localhost:50051");
+
+// List available schemas
+auto schemas = client.listSchemas();
+for (const auto& s : schemas) {
+    std::cout << s.record_name() << " (" << s.total_size() << " bytes)\n";
+}
+
+// Get schema details
+auto schema = client.getSchema("PERSON");
+
+// Create a record from field values
+std::vector<std::pair<std::string, std::string>> fields = {
+    {"ID", "EMP-001"},
+    {"FIRST_NAME", "Thomas"},
+    {"AGE", "060"}
+};
+std::string buffer = client.setFields("PERSON", fields, 115);
+
+// Send a record buffer to the server
+auto [ok, msg] = client.sendRecord("PERSON", buffer.c_str(), buffer.size());
+
+// Extract fields from a buffer
+auto extracted = client.getFields("PERSON", buffer.c_str(), buffer.size());
+
+// Convert buffer to JSON or YAML
+std::string json = client.toJson("PERSON", buffer.c_str(), buffer.size());
+std::string yaml = client.toYaml("PERSON", buffer.c_str(), buffer.size());
+
+// Convert JSON/YAML back to a buffer
+std::string roundTrip = client.fromJson("PERSON", json);
+
+// Stream multiple records
+std::vector<std::pair<std::string, std::string>> batch = {
+    {"PERSON", buffer1},
+    {"PERSON", buffer2},
+};
+auto results = client.streamRecords(batch);
+```
+
+### Protobuf Message Types
+
+Key message types defined in `copybook_service.proto`:
+
+| Message | Purpose |
+|---|---|
+| `RecordPayload` | Raw COBOL buffer with record name and size |
+| `RecordMessage` | Named field-value pairs for a record |
+| `FieldValue` | Single field name/value pair |
+| `RecordSchema` | Full schema with field descriptors |
+| `FieldDescriptor` | Field metadata: name, PIC, offset, size, type |
+| `ConvertRequest` | Convert between buffer and JSON/YAML |
+
+### Custom Record Factories
+
+Register custom RecordBase subclasses for type-safe access:
+
+```cpp
+#include "generated/person.h"  // Generated from PERSON.cpy
+
+RecordRegistry registry;
+
+// Register with a custom factory that creates typed Person records
+CopybookParser parser;
+auto def = parser.parseFile("PERSON.cpy");
+registry.registerCopybook(def, [](const char* raw, size_t size) {
+    return std::make_shared<copybook::generated::Person>(raw, size);
+});
+```
+
+---
+
 ## Build Targets & Dependencies
 
 ```
-copybook-core          (no dependencies)
+copybook-core              (no dependencies)
     │
-    ├── copybook-parser     (depends on: copybook-core)
+    ├── copybook-parser         (depends on: copybook-core)
     │
-    ├── copybook-serial     (depends on: copybook-core, nlohmann_json)
+    ├── copybook-serial         (depends on: copybook-core, nlohmann_json)
     │
-    ├── standalone-demo     (depends on: copybook-core)
+    ├── copybook-transport      (depends on: all libs, gRPC, protobuf)
     │
-    ├── copybook-tests      (depends on: all libraries, GoogleTest)
+    ├── standalone-demo         (depends on: copybook-core)
     │
-    ├── test-harness        (depends on: all libraries, ncurses)
+    ├── copybook-tests          (depends on: core + parser + serial, GoogleTest)
     │
-    └── web-designer        (depends on: all libraries, nlohmann_json, pthread)
+    ├── transport-tests         (depends on: copybook-transport, GoogleTest)
+    │
+    ├── test-harness            (depends on: core + parser + serial, ncurses)
+    │
+    ├── web-designer            (depends on: core + parser + serial, nlohmann_json)
+    │
+    ├── grpc-server             (depends on: copybook-transport)
+    │
+    └── grpc-client-demo        (depends on: copybook-transport)
 ```
 
 ### Build Targets Summary
@@ -526,19 +679,25 @@ copybook-core          (no dependencies)
 | `copybook-core` | Static library | RecordBuffer, RecordBase, FieldDescriptor, FieldType |
 | `copybook-parser` | Static library | CopybookParser, Codegen |
 | `copybook-serial` | Static library | JsonSerializer, YamlSerializer |
+| `copybook-transport` | Static library | RecordRegistry, gRPC service, gRPC client, protobuf messages |
 | `standalone-demo` | Executable | Minimal Person record demonstration |
 | `copybook-tests` | Executable | 115 unit tests (GoogleTest) |
+| `transport-tests` | Executable | 25 gRPC transport tests (GoogleTest) |
 | `test-harness` | Executable | ncurses interactive test/demo UI (7 features) |
 | `web-designer` | Executable | HTML5/SVG web-based visual class diagram designer |
+| `grpc-server` | Executable | Standalone gRPC server for copybook records |
+| `grpc-client-demo` | Executable | Client demo exercising all gRPC RPCs |
 
-### External Dependencies (auto-fetched by CMake)
+### External Dependencies
 
-| Library | Version | Purpose |
-|---|---|---|
-| [nlohmann/json](https://github.com/nlohmann/json) | 3.11.3 | JSON parsing and generation |
-| [GoogleTest](https://github.com/google/googletest) | 1.14.0 | Unit testing framework |
-| ncurses | system | Interactive test harness UI |
-| pthread | system | Web designer thread-per-connection model |
+| Library | Version | Source | Purpose |
+|---|---|---|---|
+| [nlohmann/json](https://github.com/nlohmann/json) | 3.11.3 | CMake FetchContent | JSON parsing and generation |
+| [GoogleTest](https://github.com/google/googletest) | 1.14.0 | CMake FetchContent | Unit testing framework |
+| [gRPC](https://grpc.io/) | 1.51+ | System (pkg-config) | Remote procedure calls |
+| [Protobuf](https://protobuf.dev/) | 3.21+ | System (pkg-config) | Protocol buffer serialization |
+| ncurses | system | find_package | Interactive test harness UI |
+| pthread | system | direct link | Web designer threading |
 
 ---
 
@@ -651,9 +810,42 @@ cmake --build . --target web-designer && ./web-designer
 # Open http://localhost:8080
 ```
 
+### Send Records Over gRPC
+
+```bash
+# Terminal 1: Start the server
+cd copybook-toolkit/build
+./grpc-server 50051 ../examples/copybooks
+
+# Terminal 2: Run the client demo
+./grpc-client-demo localhost:50051
+```
+
+```cpp
+// Programmatic client usage
+#include <copybook/transport/grpc_client.h>
+
+using namespace copybook::transport;
+
+CopybookClient client("localhost:50051");
+
+// Pack fields into a COBOL buffer
+std::string buffer = client.setFields("PERSON", {
+    {"ID", "EMP-001"},
+    {"FIRST_NAME", "Thomas"},
+    {"AGE", "060"}
+}, 115);
+
+// Send the buffer
+auto [ok, msg] = client.sendRecord("PERSON", buffer.c_str(), buffer.size());
+
+// Convert to JSON for downstream systems
+std::string json = client.toJson("PERSON", buffer.c_str(), buffer.size());
+```
+
 ---
 
-## REST API Reference
+## REST API Reference (Web Designer)
 
 The web designer serves a REST API on the same port as the frontend.
 All request/response bodies use JSON (`Content-Type: application/json`).
@@ -737,13 +929,13 @@ All errors return JSON: `{ "error": "description" }` with an appropriate HTTP st
 | **Sprint 1: Core Engine** | RecordBuffer, RecordBase, FieldDescriptor, FieldType, Person/Phone/Address proof-of-concept, 43 unit tests |
 | **Sprint 2: Parser + Serialization** | CopybookParser (.cpy reader), Codegen (C++ header generator), JsonSerializer (nlohmann/json), YamlSerializer, 4 sample copybooks, 115 total tests |
 | **Visual Designer** | Web-based HTML5/SVG class diagram designer with REST API, drag-and-drop nodes, field detail dialogs, code generation, JSON/YAML export, copybook import |
+| **Sprint 3: gRPC Transport** | Protocol Buffer service definition (7 RPCs), RecordRegistry, CopybookServiceImpl, CopybookClient, gRPC server/client executables, bidirectional streaming, JSON/YAML conversion over gRPC, 25 transport tests (140 total) |
 | **Documentation** | USER_GUIDE.md (21 sections), DEVELOPMENT_OPTIONS.md (this file) |
-| **Tools** | ncurses test harness (7 features), web-based visual designer |
+| **Tools** | ncurses test harness (7 features), web-based visual designer, gRPC server, gRPC client demo |
 
 ### Upcoming
 
 | Phase | Planned Scope |
 |---|---|
-| **Sprint 3: gRPC Transport** | Protocol Buffer definitions for record transport, gRPC service for send/receive of COBOL buffers, client/server stubs, integration with RecordBase |
 | **Sprint 4: Validation Engine** | Field-level validation rules (range, pattern, required), record-level cross-field validation, validation result reporting |
 | **Sprint 5: Integration & CI** | End-to-end integration tests, CI/CD pipeline (GitHub Actions), packaging, performance benchmarks |

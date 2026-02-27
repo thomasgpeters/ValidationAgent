@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package copybook.transport;
+
+option cc_enable_arenas = true;
+
+// ── Record Transport Messages ──────────────────────────────────────────
+
+// A single field value within a record.
+message FieldValue {
+    string name  = 1;   // C++ field name (e.g. "FIRST_NAME")
+    string value = 2;   // String representation of the value
+}
+
+// A raw COBOL record buffer with metadata.
+message RecordPayload {
+    string record_name = 1;   // Copybook record name (e.g. "PERSON")
+    bytes  raw_buffer  = 2;   // Fixed-length COBOL buffer
+    int32  buffer_size = 3;   // Expected buffer size in bytes
+}
+
+// A structured record with named field values (JSON-like).
+message RecordMessage {
+    string             record_name = 1;
+    repeated FieldValue fields     = 2;
+}
+
+// ── Schema Introspection Messages ──────────────────────────────────────
+
+// Describes a single field in a copybook record.
+message FieldDescriptor {
+    string name              = 1;
+    string cobol_name        = 2;
+    string pic_clause        = 3;
+    string type              = 4;   // CHARACTER, ZONED_NUMERIC, etc.
+    int32  offset            = 5;
+    int32  size              = 6;
+    int32  decimal_positions = 7;
+    bool   is_group          = 8;
+    bool   is_filler         = 9;
+    repeated FieldDescriptor children = 10;
+}
+
+// Full schema for a copybook record.
+message RecordSchema {
+    string record_name           = 1;
+    string cpp_class_name        = 2;
+    int32  total_size            = 3;
+    repeated FieldDescriptor fields = 4;
+}
+
+// ── Request/Response Messages ──────────────────────────────────────────
+
+message SendRequest {
+    RecordPayload payload = 1;
+}
+
+message SendResponse {
+    bool   success = 1;
+    string message = 2;
+}
+
+message GetFieldsRequest {
+    RecordPayload payload = 1;
+}
+
+message GetFieldsResponse {
+    RecordMessage record = 1;
+}
+
+message SetFieldsRequest {
+    RecordMessage record      = 1;
+    int32         buffer_size = 2;   // Target buffer size
+}
+
+message SetFieldsResponse {
+    RecordPayload payload = 1;
+}
+
+message SchemaRequest {
+    string record_name = 1;   // Name of the copybook to look up
+}
+
+message SchemaResponse {
+    RecordSchema schema = 1;
+}
+
+message ListSchemasRequest {}
+
+message ListSchemasResponse {
+    repeated RecordSchema schemas = 1;
+}
+
+message ConvertRequest {
+    string format = 1;   // "json" or "yaml"
+    oneof source {
+        RecordPayload payload     = 2;   // Convert buffer → format
+        string        format_data = 3;   // Convert format → buffer
+    }
+    string record_name = 4;              // Required when converting from format
+}
+
+message ConvertResponse {
+    oneof result {
+        string        format_data = 1;   // When converting buffer → format
+        RecordPayload payload     = 2;   // When converting format → buffer
+    }
+}
+
+// ── Service Definition ─────────────────────────────────────────────────
+
+service CopybookService {
+    // Send a raw COBOL buffer to the server for storage/processing.
+    rpc SendRecord(SendRequest) returns (SendResponse);
+
+    // Extract named fields from a raw COBOL buffer.
+    rpc GetFields(GetFieldsRequest) returns (GetFieldsResponse);
+
+    // Pack named field values into a raw COBOL buffer.
+    rpc SetFields(SetFieldsRequest) returns (SetFieldsResponse);
+
+    // Get the schema for a specific copybook record.
+    rpc GetSchema(SchemaRequest) returns (SchemaResponse);
+
+    // List all known copybook schemas.
+    rpc ListSchemas(ListSchemasRequest) returns (ListSchemasResponse);
+
+    // Convert between raw buffer and JSON/YAML formats.
+    rpc Convert(ConvertRequest) returns (ConvertResponse);
+
+    // Stream records: client sends a stream of records, server acknowledges each.
+    rpc StreamRecords(stream SendRequest) returns (stream SendResponse);
+}

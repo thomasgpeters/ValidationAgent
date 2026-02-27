@@ -87,3 +87,48 @@ target_include_directories(web-designer PRIVATE
     tools/web_designer
     examples/generated
 )
+
+# ── gRPC / Protobuf transport layer ──────────────────────────────────────
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GRPC REQUIRED grpc++)
+pkg_check_modules(PROTOBUF REQUIRED protobuf)
+
+# Transport library (record registry + gRPC service + client)
+add_library(copybook-transport
+    src/transport/record_transport.cpp
+    src/transport/grpc_service.cpp
+    src/transport/grpc_client.cpp
+    src/transport/copybook_service.pb.cc
+    src/transport/copybook_service.grpc.pb.cc
+)
+target_include_directories(copybook-transport PUBLIC
+    include
+    src/transport
+    ${GRPC_INCLUDE_DIRS}
+    ${PROTOBUF_INCLUDE_DIRS}
+)
+target_link_libraries(copybook-transport
+    copybook-core
+    copybook-parser
+    copybook-serial
+    ${GRPC_LIBRARIES}
+    ${PROTOBUF_LIBRARIES}
+)
+target_compile_options(copybook-transport PRIVATE ${GRPC_CFLAGS_OTHER} ${PROTOBUF_CFLAGS_OTHER})
+
+# gRPC server executable
+add_executable(grpc-server tools/grpc_server.cpp)
+target_link_libraries(grpc-server copybook-transport)
+
+# gRPC client demo executable
+add_executable(grpc-client-demo tools/grpc_client_demo.cpp)
+target_link_libraries(grpc-client-demo copybook-transport)
+
+# Transport tests
+add_executable(transport-tests test/transport_test.cpp)
+target_link_libraries(transport-tests
+    copybook-transport
+    GTest::gtest_main
+)
+target_include_directories(transport-tests PRIVATE include src/transport)
+gtest_discover_tests(transport-tests)
