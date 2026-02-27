@@ -5,6 +5,10 @@ copybook-toolkit/build/
 *.so
 *.dylib
 
+# Generated protobuf/gRPC sources (built at compile time)
+*.pb.cc
+*.pb.h
+
 # IDE files
 .idea/
 .vscode/

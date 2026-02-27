@@ -143,29 +143,29 @@ int main() {
 
 | Requirement | Minimum Version | Purpose |
 |---|---|---|
-| C++ compiler | C++17 (GCC 7+, Clang 5+) | Build all targets |
+| C++ compiler | C++17 (GCC 7+, Clang 5+, Apple Clang 13+) | Build all targets |
 | CMake | 3.16+ | Build system |
 | gRPC | 1.51+ | Transport layer |
-| Protobuf | 3.21+ | Wire protocol |
+| Protobuf | 3.21+ (5.x recommended) | Wire protocol |
+| protoc | matches libprotobuf | Protobuf code generator |
+| grpc_cpp_plugin | matches gRPC | gRPC code generator |
 | ncurses | 6.x | Interactive test harness |
-| pkg-config | any | Find gRPC/protobuf |
+| pkg-config | any | Find gRPC/protobuf (fallback) |
 
 GoogleTest and nlohmann/json are fetched automatically by CMake — no manual installation needed.
+
+Protobuf/gRPC C++ sources are generated at build time from `proto/copybook_service.proto`,
+so `protoc` and `grpc_cpp_plugin` must be on your `PATH`.
 
 **Install dependencies:**
 
 ```bash
-# macOS (Homebrew)
+# macOS (Homebrew) — works on both Intel and Apple Silicon
 brew update && brew install grpc protobuf pkg-config ncurses
-
-# macOS 12 (Monterey) — if Homebrew fails, install from source:
-#   See https://grpc.io/docs/languages/cpp/quickstart/ for building
-#   gRPC from source with -DCMAKE_INSTALL_PREFIX=$HOME/.local
-#   Then: export PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig
 
 # Ubuntu/Debian
 sudo apt-get install -y libgrpc++-dev libprotobuf-dev \
-    protobuf-compiler-grpc libncurses5-dev pkg-config
+    protobuf-compiler protobuf-compiler-grpc libncurses5-dev pkg-config
 ```
 
 ### Build Commands

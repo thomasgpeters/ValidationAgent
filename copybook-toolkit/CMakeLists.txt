@@ -100,17 +100,46 @@ else()
     set(GRPC_LINK_LIBS PkgConfig::GRPC PkgConfig::PROTOBUF)
 endif()
 
+# Locate protoc and grpc_cpp_plugin for code generation
+find_program(_PROTOC protoc REQUIRED)
+find_program(_GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
+
+# Generate protobuf/gRPC C++ sources at build time
+set(PROTO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/proto)
+set(PROTO_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto-gen)
+file(MAKE_DIRECTORY ${PROTO_GEN_DIR})
+
+set(PROTO_FILE ${PROTO_SRC_DIR}/copybook_service.proto)
+set(PB_GENERATED
+    ${PROTO_GEN_DIR}/copybook_service.pb.cc
+    ${PROTO_GEN_DIR}/copybook_service.pb.h
+    ${PROTO_GEN_DIR}/copybook_service.grpc.pb.cc
+    ${PROTO_GEN_DIR}/copybook_service.grpc.pb.h
+)
+
+add_custom_command(
+    OUTPUT ${PB_GENERATED}
+    COMMAND ${_PROTOC}
+        --proto_path=${PROTO_SRC_DIR}
+        --cpp_out=${PROTO_GEN_DIR}
+        --grpc_out=${PROTO_GEN_DIR}
+        --plugin=protoc-gen-grpc=${_GRPC_CPP_PLUGIN}
+        ${PROTO_FILE}
+    DEPENDS ${PROTO_FILE}
+    COMMENT "Generating protobuf/gRPC C++ sources from copybook_service.proto"
+)
+
 # Transport library (record registry + gRPC service + client)
 add_library(copybook-transport
     src/transport/record_transport.cpp
     src/transport/grpc_service.cpp
     src/transport/grpc_client.cpp
-    src/transport/copybook_service.pb.cc
-    src/transport/copybook_service.grpc.pb.cc
+    ${PROTO_GEN_DIR}/copybook_service.pb.cc
+    ${PROTO_GEN_DIR}/copybook_service.grpc.pb.cc
 )
 target_include_directories(copybook-transport PUBLIC
     include
-    src/transport
+    ${PROTO_GEN_DIR}
 )
 target_link_libraries(copybook-transport
     copybook-core
@@ -133,7 +162,7 @@ target_link_libraries(transport-tests
     copybook-transport
     GTest::gtest_main
 )
-target_include_directories(transport-tests PRIVATE include src/transport)
+target_include_directories(transport-tests PRIVATE include ${PROTO_GEN_DIR})
 gtest_discover_tests(transport-tests)
 
 # ── Validation library ───────────────────────────────────────────────────────
@@ -150,7 +179,7 @@ target_link_libraries(validation-tests
     copybook-transport
     GTest::gtest_main
 )
-target_include_directories(validation-tests PRIVATE include src/transport)
+target_include_directories(validation-tests PRIVATE include ${PROTO_GEN_DIR})
 gtest_discover_tests(validation-tests)
 
 # ── Integration tests (end-to-end) ──────────────────────────────────────────
@@ -160,5 +189,5 @@ target_link_libraries(integration-tests
     copybook-transport
     GTest::gtest_main
 )
-target_include_directories(integration-tests PRIVATE include src/transport)
+target_include_directories(integration-tests PRIVATE include ${PROTO_GEN_DIR})
 gtest_discover_tests(integration-tests)
