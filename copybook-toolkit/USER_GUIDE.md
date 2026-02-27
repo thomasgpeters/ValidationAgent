@@ -156,7 +156,12 @@ GoogleTest and nlohmann/json are fetched automatically by CMake — no manual in
 
 ```bash
 # macOS (Homebrew)
-brew install grpc protobuf pkg-config ncurses
+brew update && brew install grpc protobuf pkg-config ncurses
+
+# macOS 12 (Monterey) — if Homebrew fails, install from source:
+#   See https://grpc.io/docs/languages/cpp/quickstart/ for building
+#   gRPC from source with -DCMAKE_INSTALL_PREFIX=$HOME/.local
+#   Then: export PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig
 
 # Ubuntu/Debian
 sudo apt-get install -y libgrpc++-dev libprotobuf-dev \
