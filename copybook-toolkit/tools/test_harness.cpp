@@ -25,6 +25,12 @@
 #include <copybook/core/record_buffer.h>
 #include <copybook/core/field_type.h>
 
+// Parser and serialization
+#include <copybook/parser/copybook_parser.h>
+#include <copybook/parser/codegen.h>
+#include <copybook/serial/json_serializer.h>
+#include <copybook/serial/yaml_serializer.h>
+
 // Include the Person example for the interactive inspector
 #include "person.h"
 #include "phone.h"
@@ -526,6 +532,157 @@ static void showFieldLayout() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Feature 6: JSON / YAML Serialization Demo
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void showSerializationDemo() {
+    drawStatusBar("Generating JSON and YAML output...");
+
+    Person p;
+    p.setData("ID",             "EMP-001");
+    p.setData("FIRST_NAME",     "Thomas");
+    p.setData("LAST_NAME",      "Peters");
+    p.setData("MIDDLE_INITIAL", "G");
+    p.setNumeric("AGE",          60);
+    p.setData("SEX",            "M");
+    p.setData("DATE_OF_BIRTH",  "1965-03-15");
+    p.homePhone().setData("NUMBER", "555-123-4567");
+    p.workPhone().setData("NUMBER", "555-987-6543");
+    p.syncChildren();
+
+    std::ostringstream out;
+
+    out << "JSON / YAML Serialization Demo\n";
+    out << std::string(60, '=') << "\n\n";
+
+    // JSON output
+    std::string json = JsonSerializer::toJson(p);
+    out << "── JSON Output (nlohmann/json) ──\n\n";
+    out << json << "\n";
+
+    // Compact JSON
+    std::string compact = JsonSerializer::toJson(p, false);
+    out << "── Compact JSON ──\n\n";
+    out << compact << "\n\n";
+
+    // YAML output
+    std::string yaml = YamlSerializer::toYaml(p);
+    out << "── YAML Output ──\n\n";
+    out << yaml << "\n";
+
+    // Round-trip: JSON → Person2 → YAML
+    out << std::string(60, '-') << "\n";
+    out << "── Round-Trip: JSON → Record → YAML ──\n\n";
+
+    Person p2;
+    JsonSerializer::fromJson(p2, json);
+    p2.syncChildren();
+    std::string yaml2 = YamlSerializer::toYaml(p2);
+    out << yaml2 << "\n";
+
+    // Round-trip: YAML → Person3 → JSON
+    out << "── Round-Trip: YAML → Record → JSON ──\n\n";
+    Person p3;
+    YamlSerializer::fromYaml(p3, yaml);
+    p3.syncChildren();
+    std::string json3 = JsonSerializer::toJson(p3);
+    out << json3 << "\n";
+
+    // Verify
+    out << std::string(60, '-') << "\n";
+    out << "── Verification ──\n\n";
+    out << "  Original FIRST_NAME: " << p.getData("FIRST_NAME").substr(0, 6) << "\n";
+    out << "  JSON→Rec FIRST_NAME: " << p2.getData("FIRST_NAME").substr(0, 6) << "\n";
+    out << "  YAML→Rec FIRST_NAME: " << p3.getData("FIRST_NAME").substr(0, 6) << "\n";
+    out << "  Original AGE:        " << p.getNumeric("AGE") << "\n";
+    out << "  JSON→Rec AGE:        " << p2.getNumeric("AGE") << "\n";
+    out << "  YAML→Rec AGE:        " << p3.getNumeric("AGE") << "\n";
+
+    bool allPass = (p2.getData("FIRST_NAME").substr(0, 6) == "Thomas" &&
+                    p3.getData("FIRST_NAME").substr(0, 6) == "Thomas" &&
+                    p2.getNumeric("AGE") == 60 &&
+                    p3.getNumeric("AGE") == 60);
+    out << "\n  Result: " << (allPass ? "[PASS] All round-trips match" : "[FAIL] Mismatch detected") << "\n";
+
+    showOutputViewer("JSON / YAML Serialization Demo", out.str());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Feature 7: Copybook Parser + Codegen Demo
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void showParserDemo() {
+    drawStatusBar("Parsing copybook files...");
+
+    CopybookParser parser;
+    Codegen codegen;
+
+    std::ostringstream out;
+    out << "Copybook Parser + Code Generator Demo\n";
+    out << std::string(60, '=') << "\n\n";
+
+    // List of copybooks to parse
+    struct CpyFile { const char* path; const char* name; };
+    CpyFile files[] = {
+        {"../examples/copybooks/PERSON.cpy",         "PERSON"},
+        {"../examples/copybooks/ACCOUNT.cpy",        "ACCOUNT"},
+        {"../examples/copybooks/BROKER-CONTROL.cpy", "BROKER-CONTROL"},
+        {"../examples/copybooks/TRADE-RECORD.cpy",   "TRADE-RECORD"},
+    };
+
+    for (const auto& f : files) {
+        out << "── Parsing: " << f.name << " ──\n\n";
+
+        try {
+            auto def = parser.parseFile(f.path);
+            out << "  Record:     " << def.record_name << "\n";
+            out << "  C++ class:  " << def.cpp_class_name << "\n";
+            out << "  Total size: " << def.total_size << " bytes\n";
+            out << "  Fields:     " << def.fields.size() << "\n\n";
+
+            out << "  Offset  Size  Type              Name\n";
+            out << "  ------  ----  ----------------  --------------------\n";
+            for (const auto& field : def.fields) {
+                char line[128];
+                snprintf(line, sizeof(line), "  %4d    %3d   %-16s  %s%s",
+                         field.offset, field.size,
+                         fieldTypeName(field.type).c_str(),
+                         field.cpp_name.c_str(),
+                         field.is_group ? " (GROUP)" : "");
+                out << line << "\n";
+
+                // Show children for groups
+                for (const auto& child : field.children) {
+                    snprintf(line, sizeof(line), "          %3d   %-16s    . %s",
+                             child.size, fieldTypeName(child.type).c_str(),
+                             child.cpp_name.c_str());
+                    out << line << "\n";
+                }
+            }
+            out << "\n";
+        } catch (const std::exception& e) {
+            out << "  ERROR: " << e.what() << "\n\n";
+        }
+    }
+
+    // Show generated C++ for PERSON
+    out << std::string(60, '=') << "\n";
+    out << "── Generated C++ Header for PERSON ──\n\n";
+
+    try {
+        auto def = parser.parseFile("../examples/copybooks/PERSON.cpy");
+        CodegenOptions opts;
+        opts.ns = "copybook::generated";
+        std::string code = codegen.generateHeader(def, opts);
+        out << code << "\n";
+    } catch (const std::exception& e) {
+        out << "ERROR: " << e.what() << "\n";
+    }
+
+    showOutputViewer("Copybook Parser + Code Generator", out.str());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Main Menu
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -550,6 +707,8 @@ int main() {
         {"Interactive Inspector",   "Create and edit Person records with live view",  interactiveInspector},
         {"Buffer Round-Trip Test",  "Serialize → deserialize → verify all fields",   runRoundTripTest},
         {"Field Layout Visualizer", "Show byte-level record layout and offset map",  showFieldLayout},
+        {"JSON/YAML Serialization", "Export/import Person record as JSON and YAML",  showSerializationDemo},
+        {"Copybook Parser + Codegen", "Parse .cpy files and generate C++ headers",   showParserDemo},
     };
 
     int selected = 0;
@@ -566,7 +725,7 @@ int main() {
         attroff(COLOR_PAIR(PAIR_TITLE) | A_BOLD);
 
         attron(COLOR_PAIR(PAIR_HEADER));
-        mvprintw(2, 2, "v1.0.0  |  Sprint 1 Core Engine  |  %d test suites available",
+        mvprintw(2, 2, "v2.0.0  |  Parser + Serialization  |  %d features available",
                  (int)menu.size());
         attroff(COLOR_PAIR(PAIR_HEADER));
 
