@@ -89,8 +89,16 @@ target_include_directories(web-designer PRIVATE
 )
 
 # ── gRPC / Protobuf transport layer ──────────────────────────────────────
-find_package(gRPC CONFIG REQUIRED)
-find_package(Protobuf REQUIRED)
+find_package(gRPC CONFIG QUIET)
+if(gRPC_FOUND)
+    find_package(Protobuf REQUIRED)
+    set(GRPC_LINK_LIBS gRPC::grpc++ protobuf::libprotobuf)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GRPC REQUIRED IMPORTED_TARGET grpc++)
+    pkg_check_modules(PROTOBUF REQUIRED IMPORTED_TARGET protobuf)
+    set(GRPC_LINK_LIBS PkgConfig::GRPC PkgConfig::PROTOBUF)
+endif()
 
 # Transport library (record registry + gRPC service + client)
 add_library(copybook-transport
@@ -108,8 +116,7 @@ target_link_libraries(copybook-transport
     copybook-core
     copybook-parser
     copybook-serial
-    gRPC::grpc++
-    protobuf::libprotobuf
+    ${GRPC_LINK_LIBS}
 )
 
 # gRPC server executable
