@@ -152,6 +152,22 @@ int main() {
 
 GoogleTest and nlohmann/json are fetched automatically by CMake — no manual installation needed.
 
+**Install dependencies:**
+
+```bash
+# macOS (Homebrew)
+brew update && brew install grpc protobuf pkg-config ncurses
+
+# macOS 12 (Monterey) — if Homebrew fails, install from source:
+#   See https://grpc.io/docs/languages/cpp/quickstart/ for building
+#   gRPC from source with -DCMAKE_INSTALL_PREFIX=$HOME/.local
+#   Then: export PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig
+
+# Ubuntu/Debian
+sudo apt-get install -y libgrpc++-dev libprotobuf-dev \
+    protobuf-compiler-grpc libncurses5-dev pkg-config
+```
+
 ### Build Commands
 
 ```bash
@@ -869,10 +885,10 @@ that runs on every push and pull request.
 
 ### Build Matrix
 
-| Compiler | Build Types |
+| OS | Build Types |
 |---|---|
-| GCC | Debug, Release |
-| Clang | Debug, Release |
+| Ubuntu (latest) | Debug, Release |
+| macOS (latest) | Debug, Release |
 
 All 4 test suites run for each matrix combination. Test result XML artifacts
 are uploaded for each run.

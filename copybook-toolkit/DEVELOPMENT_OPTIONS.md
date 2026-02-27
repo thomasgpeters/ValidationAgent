@@ -898,15 +898,15 @@ multiple configurations on every push and pull request.
 
 ### Build Matrix
 
-| Compiler | Build Types |
+| OS | Build Types |
 |---|---|
-| GCC (default) | Debug, Release |
-| Clang | Debug, Release |
+| Ubuntu (latest) | Debug, Release |
+| macOS (latest) | Debug, Release |
 
 ### Pipeline Steps
 
-1. **Install dependencies** — apt-get install cmake, gRPC, protobuf, ncurses, pkg-config
-2. **Configure** — CMake with selected compiler and build type
+1. **Install dependencies** — `brew install` (macOS) or `apt-get install` (Ubuntu) for gRPC, protobuf, ncurses, pkg-config
+2. **Configure** — CMake with selected build type
 3. **Build** — Full build including all libraries and executables
 4. **Run core tests** — 115 unit tests (parser, serializer, core)
 5. **Run transport tests** — 25 gRPC transport tests

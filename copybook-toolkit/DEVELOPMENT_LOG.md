@@ -202,7 +202,7 @@ a CI/CD pipeline for automated builds and testing.
   - Large record stress test (50 fields, 1000 bytes)
   - Cross-field validation integration
 - **GitHub Actions CI pipeline** (`.github/workflows/ci.yml`) —
-  2x2 build matrix: GCC/Clang x Debug/Release. Runs all 4 test suites,
+  2x2 build matrix: Ubuntu/macOS x Debug/Release. Runs all 4 test suites,
   uploads test result XML artifacts.
 - **184 total tests** across 4 suites.
 
@@ -210,7 +210,8 @@ a CI/CD pipeline for automated builds and testing.
 
 - Integration tests use `RecordRegistry` and `GenericRecord` (no generated
   code) to test the full dynamic pipeline
-- CI matrix covers both GCC and Clang to catch compiler-specific issues
+- CI matrix covers both Ubuntu and macOS to catch platform-specific issues
+- macOS uses Homebrew for gRPC/protobuf; Ubuntu uses apt
 - Test results uploaded as artifacts for post-run analysis
 
 ---
