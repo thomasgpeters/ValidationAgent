@@ -21,12 +21,16 @@
 13. [C++ Code Generator](#c-code-generator)
 14. [JSON Serialization](#json-serialization)
 15. [YAML Serialization](#yaml-serialization)
-16. [Migration from Java](#migration-from-java)
-17. [Test Harness](#test-harness)
-18. [Running Tests](#running-tests)
-19. [Project Structure](#project-structure)
-20. [Development Options Reference](#development-options-reference)
-21. [Roadmap](#roadmap)
+16. [gRPC Transport Layer](#grpc-transport-layer)
+17. [Validation Engine](#validation-engine)
+18. [Visual Designer](#visual-designer)
+19. [Migration from Java](#migration-from-java)
+20. [Test Harness](#test-harness)
+21. [Running Tests](#running-tests)
+22. [CI/CD Pipeline](#cicd-pipeline)
+23. [Project Structure](#project-structure)
+24. [Development Options Reference](#development-options-reference)
+25. [Roadmap](#roadmap)
 
 ---
 
@@ -55,24 +59,46 @@ compile-time registry pattern that is faster, safer, and easier to debug.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    Your Application                       │
-├──────────────────────────────────────────────────────────┤
-│  Generated Record Classes (Person, Account, etc.)        │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐         │
-│  │ Person     │  │ Account    │  │ BrokerCtl  │  ...     │
-│  │ : RecordBase  │ : RecordBase  │ : RecordBase          │
-│  └────────────┘  └────────────┘  └────────────┘         │
-├──────────────────────────────────────────────────────────┤
-│  Core Library (libcopybook-core.a)                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │ RecordBase   │  │ RecordBuffer │  │FieldDescriptor│  │
-│  │              │  │              │  │FieldType      │  │
-│  │ setData()    │  │ read/write   │  │               │  │
-│  │ getData()    │  │ slice/merge  │  │ name, offset  │  │
-│  │ setNumeric() │  │ boundsCheck  │  │ size, type    │  │
-│  └──────────────┘  └──────────────┘  └───────────────┘  │
-└──────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                      Your Application                         │
+├───────────────────────────────────────────────────────────────┤
+│  Generated / Dynamic Record Classes                           │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐              │
+│  │ Person     │  │ Account    │  │GenericRecord│  ...         │
+│  │ : RecordBase  │ : RecordBase  │ : RecordBase               │
+│  └────────────┘  └────────────┘  └────────────┘              │
+├───────────────────────────────────────────────────────────────┤
+│  Validation (libcopybook-validation.a)                        │
+│  ┌───────────────────┐  ┌──────────────────────────────────┐  │
+│  │ ValidationEngine  │  │ Rules: Required, Range, Pattern, │  │
+│  │ validate()        │  │ Length, Enum, Custom (lambda)     │  │
+│  │ formatResult()    │  │ Severity: ERROR / WARNING / INFO  │  │
+│  └───────────────────┘  └──────────────────────────────────┘  │
+├───────────────────────────────────────────────────────────────┤
+│  Transport (libcopybook-transport.a)                          │
+│  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐  │
+│  │ RecordRegistry │  │CopybookServiceImpl│ │CopybookClient│  │
+│  │ load/create    │  │ gRPC server impl  │ │ gRPC client   │  │
+│  └────────────────┘  └──────────────────┘  └──────────────┘  │
+├───────────────────────────────────────────────────────────────┤
+│  Serialization (libcopybook-serial.a)                         │
+│  ┌────────────────┐  ┌────────────────┐                       │
+│  │ JsonSerializer │  │ YamlSerializer │                       │
+│  └────────────────┘  └────────────────┘                       │
+├───────────────────────────────────────────────────────────────┤
+│  Parser (libcopybook-parser.a)                                │
+│  ┌────────────────┐  ┌────────────────┐                       │
+│  │ CopybookParser │  │    Codegen     │                       │
+│  └────────────────┘  └────────────────┘                       │
+├───────────────────────────────────────────────────────────────┤
+│  Core Library (libcopybook-core.a)                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐       │
+│  │ RecordBase   │  │ RecordBuffer │  │FieldDescriptor│       │
+│  │ setData()    │  │ read/write   │  │FieldType      │       │
+│  │ getData()    │  │ slice/merge  │  │ name, offset   │       │
+│  │ setNumeric() │  │ boundsCheck  │  │ size, type     │       │
+│  └──────────────┘  └──────────────┘  └───────────────┘       │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -115,13 +141,16 @@ int main() {
 
 ### Prerequisites
 
-| Requirement | Minimum Version |
-|---|---|
-| C++ compiler | C++17 (GCC 7+, Clang 5+, MSVC 19.14+) |
-| CMake | 3.16+ |
-| ncurses (for test harness only) | 6.x |
+| Requirement | Minimum Version | Purpose |
+|---|---|---|
+| C++ compiler | C++17 (GCC 7+, Clang 5+) | Build all targets |
+| CMake | 3.16+ | Build system |
+| gRPC | 1.51+ | Transport layer |
+| Protobuf | 3.21+ | Wire protocol |
+| ncurses | 6.x | Interactive test harness |
+| pkg-config | any | Find gRPC/protobuf |
 
-GoogleTest is fetched automatically by CMake — no manual installation needed.
+GoogleTest and nlohmann/json are fetched automatically by CMake — no manual installation needed.
 
 ### Build Commands
 
@@ -132,27 +161,46 @@ mkdir -p build && cd build
 # Configure
 cmake .. -DCMAKE_BUILD_TYPE=Debug
 
-# Build everything (library + demo + tests + harness)
+# Build everything (libraries + tools + tests)
 cmake --build .
 
-# Run unit tests
+# Run all tests
 ctest --output-on-failure
+
+# Run individual test suites
+./copybook-tests          # 115 core/parser/serial tests
+./transport-tests         # 25 gRPC transport tests
+./validation-tests        # 28 validation rule/engine tests
+./integration-tests       # 16 end-to-end integration tests
 
 # Run standalone demo
 ./standalone-demo
 
-# Run interactive test harness
-./test-harness
+# Start the visual designer
+./web-designer            # http://localhost:8080
+
+# Start the gRPC server
+./grpc-server             # localhost:50051
 ```
 
 ### Build Targets
 
-| Target | Description |
-|---|---|
-| `copybook-core` | Static library (`libcopybook-core.a`) |
-| `standalone-demo` | Non-interactive demo showing full record lifecycle |
-| `copybook-tests` | GoogleTest unit test binary |
-| `test-harness` | ncurses interactive test/demo runner |
+| Target | Type | Description |
+|---|---|---|
+| `copybook-core` | Library | RecordBuffer, RecordBase, FieldDescriptor |
+| `copybook-parser` | Library | CopybookParser, Codegen |
+| `copybook-serial` | Library | JsonSerializer, YamlSerializer |
+| `copybook-transport` | Library | RecordRegistry, gRPC service/client |
+| `copybook-validation` | Library | ValidationEngine, validation rules |
+| `standalone-demo` | Executable | Non-interactive Person record demo |
+| `copybook-tests` | Executable | 115 unit tests (GoogleTest) |
+| `transport-tests` | Executable | 25 gRPC transport tests |
+| `validation-tests` | Executable | 28 validation engine tests |
+| `integration-tests` | Executable | 16 end-to-end integration tests |
+| `test-harness` | Executable | ncurses interactive test/demo UI |
+| `web-designer` | Executable | HTML5/SVG visual class diagram designer |
+| `grpc-server` | Executable | Standalone gRPC server |
+| `grpc-client-demo` | Executable | Client demo for all gRPC RPCs |
 
 ---
 
@@ -534,6 +582,173 @@ YamlSerializer::fromYaml(p, yaml);
 
 ---
 
+## gRPC Transport Layer
+
+The transport layer provides remote access to copybook records over gRPC,
+replacing the Java socket-based server.
+
+### RecordRegistry
+
+Manages copybook schemas and creates records dynamically at runtime (no
+code generation needed):
+
+```cpp
+#include <copybook/transport/record_transport.h>
+using namespace copybook::transport;
+
+RecordRegistry registry;
+registry.loadDirectory("examples/copybooks");  // load all .cpy files
+
+// Create records by name
+auto record = registry.createBlankRecord("PERSON");
+record->setData("FIRST_NAME", "Alice");
+
+// Create from raw COBOL buffer
+auto record2 = registry.createRecord("PERSON", rawBuffer, 115);
+
+// Extract/apply field values
+auto fields = RecordRegistry::extractFields(*record);
+RecordRegistry::applyFields(*record2, fields);
+```
+
+### gRPC Server
+
+```bash
+# Start the server (loads all copybooks from a directory)
+./grpc-server 50051 ../examples/copybooks
+```
+
+The server exposes 7 RPCs: `SendRecord`, `GetFields`, `SetFields`,
+`GetSchema`, `ListSchemas`, `Convert`, and `StreamRecords` (bidirectional).
+
+### gRPC Client
+
+```cpp
+#include <copybook/transport/grpc_client.h>
+using namespace copybook::transport;
+
+CopybookClient client("localhost:50051");
+
+// List available schemas
+auto schemas = client.listSchemas();
+
+// Pack fields into a COBOL buffer
+std::string buffer = client.setFields("PERSON", {
+    {"ID", "EMP-001"}, {"FIRST_NAME", "Thomas"}, {"AGE", "060"}
+}, 115);
+
+// Convert buffer to JSON
+std::string json = client.toJson("PERSON", buffer.c_str(), buffer.size());
+
+// Stream multiple records
+auto results = client.streamRecords(batch);
+```
+
+---
+
+## Validation Engine
+
+A rule-based validation framework for COBOL copybook records.
+
+### Quick Start
+
+```cpp
+#include <copybook/validation/validation_engine.h>
+#include <copybook/validation/validation_rule.h>
+using namespace copybook::validation;
+
+ValidationEngine engine;
+
+// Field-level rules
+engine.addRule("PERSON", std::make_shared<RequiredRule>("ID"));
+engine.addRule("PERSON", std::make_shared<RangeRule>("AGE", 0, 150));
+engine.addRule("PERSON", std::make_shared<EnumRule>("SEX",
+    std::vector<std::string>{"M", "F", "X"}));
+engine.addRule("PERSON", std::make_shared<PatternRule>(
+    "DATE_OF_BIRTH", R"(\d{4}-\d{2}-\d{2})", "YYYY-MM-DD"));
+
+// Validate
+auto result = engine.validate("PERSON", *record);
+if (!result.valid) {
+    std::cerr << ValidationEngine::formatResult(result);
+}
+```
+
+### Built-in Rule Types
+
+| Rule | Purpose |
+|---|---|
+| `RequiredRule` | Field must not be empty (all spaces) |
+| `RangeRule` | Numeric field within [min, max] |
+| `PatternRule` | Regex match on trimmed field value |
+| `LengthRule` | Trimmed length within [min, max] |
+| `EnumRule` | Value must be in allowed set |
+| `CustomRule` | Lambda for cross-field logic |
+
+### Severity Levels
+
+Rules support `Severity::ERROR` (fails validation), `Severity::WARNING`,
+and `Severity::INFO`. Only ERROR causes `result.valid` to be false.
+
+### Cross-Field Validation
+
+```cpp
+engine.addRule("PERSON", std::make_shared<CustomRule>("active-needs-id",
+    [](const RecordBase& rec, ValidationResult& res) {
+        std::string status = rec.getData("STATUS");
+        if (status.find_first_not_of(' ') != std::string::npos &&
+            status[0] == 'A') {
+            std::string id = rec.getData("ID");
+            if (id.find_first_not_of(' ') == std::string::npos)
+                res.addError("ID", "active-needs-id",
+                    "Active records must have an ID");
+        }
+    }));
+```
+
+### Result Formatting
+
+Results can be output as human-readable text or machine-readable JSON:
+
+```cpp
+std::string text = ValidationEngine::formatResult(result);
+std::string json = ValidationEngine::formatResultJson(result);
+```
+
+See [DEVELOPMENT_OPTIONS.md](DEVELOPMENT_OPTIONS.md#validation-engine) for
+the full API reference including global rules, engine management, and
+detailed examples.
+
+---
+
+## Visual Designer
+
+A web-based HTML5/SVG visual class diagram designer for COBOL copybook
+definitions. Runs as a self-contained C++ HTTP server with no external
+web framework dependencies.
+
+```bash
+cd copybook-toolkit/build
+./web-designer 8080 ../examples/copybooks
+# Open http://localhost:8080
+```
+
+### Features
+
+- **Class diagram view** — UML-style nodes for each copybook record
+- **Drag-and-drop** — rearrange nodes on the SVG canvas
+- **Bezier curve arrows** — connect parent records to GROUP children
+- **Field detail dialog** — double-click any node to see all fields with
+  offsets, sizes, types, and PIC clauses
+- **Generate C++** — produce a complete C++ header from any copybook
+- **Export JSON/YAML** — export copybook schemas in structured formats
+- **Import Copybook** — paste `.cpy` source to add new records to the diagram
+
+See [DEVELOPMENT_OPTIONS.md](DEVELOPMENT_OPTIONS.md#visual-designer-web-application)
+for the full REST API reference and keyboard shortcuts.
+
+---
+
 ## Migration from Java
 
 ### Field Access — Before (Java)
@@ -609,25 +824,58 @@ cd copybook-toolkit/build
 
 ## Running Tests
 
-### Unit Tests (GoogleTest)
+### All Tests
 
 ```bash
 cd copybook-toolkit/build
 ctest --output-on-failure
 ```
 
-Or run the test binary directly for verbose output:
+### Individual Test Suites
 
 ```bash
-./copybook-tests --gtest_print_time=0
+./copybook-tests          # 115 core/parser/serial tests
+./transport-tests         # 25 gRPC transport tests
+./validation-tests        # 28 validation rule/engine tests
+./integration-tests       # 16 end-to-end integration tests
 ```
 
-### Specific Test Suite
+**Total: 184 tests** across 4 suites.
+
+### Filtering Tests
 
 ```bash
 ./copybook-tests --gtest_filter="RecordBufferTest.*"
 ./copybook-tests --gtest_filter="PersonTest.*"
+./validation-tests --gtest_filter="ValidationTest.Required*"
+./integration-tests --gtest_filter="FullPipelineTest.PersonEndToEnd"
 ```
+
+### Test Coverage
+
+| Suite | Tests | Scope |
+|---|---|---|
+| `copybook-tests` | 115 | RecordBuffer, RecordBase, CopybookParser, Codegen, JSON/YAML serialization |
+| `transport-tests` | 25 | RecordRegistry, gRPC service (in-process), all 7 RPCs, bidirectional streaming |
+| `validation-tests` | 28 | All 6 rule types, ValidationEngine, severity levels, text/JSON formatting |
+| `integration-tests` | 16 | Full pipeline: parse → create → validate → serialize → round-trip |
+
+---
+
+## CI/CD Pipeline
+
+The project includes a GitHub Actions CI pipeline (`.github/workflows/ci.yml`)
+that runs on every push and pull request.
+
+### Build Matrix
+
+| Compiler | Build Types |
+|---|---|
+| GCC | Debug, Release |
+| Clang | Debug, Release |
+
+All 4 test suites run for each matrix combination. Test result XML artifacts
+are uploaded for each run.
 
 ---
 
@@ -638,6 +886,7 @@ copybook-toolkit/
 ├── CMakeLists.txt                          Build system
 ├── USER_GUIDE.md                           This file
 ├── DEVELOPMENT_OPTIONS.md                  Feature reference & examples
+├── DEVELOPMENT_LOG.md                      Sprint history & changelog
 ├── include/copybook/
 │   ├── core/
 │   │   ├── field_type.h                    COBOL type enum
@@ -647,9 +896,16 @@ copybook-toolkit/
 │   ├── parser/
 │   │   ├── copybook_parser.h               .cpy file parser
 │   │   └── codegen.h                       C++ header generator
-│   └── serial/
-│       ├── json_serializer.h               JSON via nlohmann/json
-│       └── yaml_serializer.h               YAML serializer
+│   ├── serial/
+│   │   ├── json_serializer.h               JSON via nlohmann/json
+│   │   └── yaml_serializer.h               YAML serializer
+│   ├── transport/
+│   │   ├── record_transport.h              RecordRegistry, GenericRecord
+│   │   ├── grpc_service.h                  gRPC server implementation
+│   │   └── grpc_client.h                   gRPC client wrapper
+│   └── validation/
+│       ├── validation_rule.h               Rule types & ValidationResult
+│       └── validation_engine.h             ValidationEngine
 ├── src/
 │   ├── core/
 │   │   ├── record_buffer.cpp
@@ -657,9 +913,19 @@ copybook-toolkit/
 │   ├── parser/
 │   │   ├── copybook_parser.cpp
 │   │   └── codegen.cpp
-│   └── serial/
-│       ├── json_serializer.cpp
-│       └── yaml_serializer.cpp
+│   ├── serial/
+│   │   ├── json_serializer.cpp
+│   │   └── yaml_serializer.cpp
+│   ├── transport/
+│   │   ├── record_transport.cpp            RecordRegistry + GenericRecord
+│   │   ├── grpc_service.cpp                CopybookServiceImpl
+│   │   ├── grpc_client.cpp                 CopybookClient
+│   │   ├── copybook_service.pb.cc          Generated protobuf
+│   │   └── copybook_service.grpc.pb.cc     Generated gRPC stubs
+│   └── validation/
+│       └── validation_engine.cpp
+├── proto/
+│   └── copybook_service.proto              gRPC service definition (7 RPCs)
 ├── examples/
 │   ├── copybooks/
 │   │   ├── PERSON.cpy                      115 bytes — basic record
@@ -678,9 +944,19 @@ copybook-toolkit/
 │   ├── record_base_test.cpp                24 tests
 │   ├── copybook_parser_test.cpp            30 tests
 │   ├── codegen_test.cpp                    22 tests
-│   └── serializer_test.cpp                 20 tests
-└── tools/
-    └── test_harness.cpp                    ncurses harness (7 features)
+│   ├── serializer_test.cpp                 20 tests
+│   ├── transport_test.cpp                  25 tests (gRPC in-process)
+│   ├── validation_test.cpp                 28 tests
+│   └── integration_test.cpp               16 tests (end-to-end)
+├── tools/
+│   ├── test_harness.cpp                    ncurses harness (7 features)
+│   ├── grpc_server.cpp                     Standalone gRPC server
+│   ├── grpc_client_demo.cpp                gRPC client demo
+│   └── web_designer/
+│       ├── main.cpp                        HTTP server
+│       └── frontend.h                      Embedded HTML5/SVG SPA
+└── .github/workflows/
+    └── ci.yml                              GitHub Actions CI pipeline
 ```
 
 ---
@@ -689,8 +965,12 @@ copybook-toolkit/
 
 See [DEVELOPMENT_OPTIONS.md](DEVELOPMENT_OPTIONS.md) for comprehensive coverage of:
 - All code generation options and configurations
-- JSON/YAML serialization with examples
+- JSON/YAML serialization with detailed examples
 - Cross-format round-trip patterns
+- gRPC transport layer API reference with protobuf message types
+- Validation engine API reference with all 6 rule types
+- Visual designer REST API reference and keyboard shortcuts
+- CI/CD pipeline configuration and test coverage summary
 - Sample copybook descriptions
 - Development workflow recipes
 
@@ -700,8 +980,9 @@ See [DEVELOPMENT_OPTIONS.md](DEVELOPMENT_OPTIONS.md) for comprehensive coverage 
 
 | Sprint | Status | Deliverable |
 |---|---|---|
-| **1** | Complete | Core engine: RecordBuffer, RecordBase, Person proof-of-concept |
-| **2** | Complete | COBOL copybook parser, C++ code generator, JSON/YAML serialization |
-| **3** | Next | gRPC transport layer: replaces Java socket server |
-| **4** | Planned | Validation engine: port rule evaluation from Java `ValidateData` |
-| **5** | Planned | Integration tests, CI pipeline, end-to-end demo |
+| **1** | Complete | Core engine: RecordBuffer, RecordBase, Person proof-of-concept (43 tests) |
+| **2** | Complete | Copybook parser, C++ code generator, JSON/YAML serialization (115 tests) |
+| **Visual Designer** | Complete | HTML5/SVG web-based visual class diagram designer |
+| **3** | Complete | gRPC transport layer: RecordRegistry, 7 RPCs, bidirectional streaming (140 tests) |
+| **4** | Complete | Validation engine: 6 rule types, severity levels, formatted reporting (168 tests) |
+| **5** | Complete | Integration tests, CI/CD pipeline (GitHub Actions), 184 total tests |
